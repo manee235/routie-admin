@@ -14,8 +14,6 @@ const BusRequests = () => {
     { id: '3', driver_name: 'Nimal Silva', bus_reg: 'CP NA-3321', status: 'REJECTED', driver_note: 'Need a bus with more seats.', created_at: '2026-05-01' },
   ];
 
-  useEffect(() => { fetchRequests(); }, [fetchRequests]);
-
   const notify = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
@@ -34,7 +32,9 @@ const BusRequests = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [seedData]);
+
+  useEffect(() => { fetchRequests(); }, [fetchRequests]);
 
   const updateStatus = async (row, newStatus) => {
     try {
