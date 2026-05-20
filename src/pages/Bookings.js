@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import DataTable from '../components/DataTable';
-import { Download, RefreshCw, X, FileDown } from 'lucide-react';
+import { RefreshCw, X, FileDown } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { exportToPDF } from '../utils/exportPDF';
 

@@ -14,14 +14,14 @@ const BusRequests = () => {
     { id: '3', driver_name: 'Nimal Silva', bus_reg: 'CP NA-3321', status: 'REJECTED', driver_note: 'Need a bus with more seats.', created_at: '2026-05-01' },
   ];
 
-  useEffect(() => { fetchRequests(); }, []);
+  useEffect(() => { fetchRequests(); }, [fetchRequests]);
 
   const notify = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   };
 
-  const fetchRequests = async () => {
+  const fetchRequests = React.useCallback(async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -34,7 +34,7 @@ const BusRequests = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const updateStatus = async (row, newStatus) => {
     try {

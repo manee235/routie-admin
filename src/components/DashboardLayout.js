@@ -20,7 +20,7 @@ import {
 
 const DashboardLayout = () => {
   const { isDarkMode, toggleTheme } = useTheme();
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const location = useLocation();
 
   const navItems = [
