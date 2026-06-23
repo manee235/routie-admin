@@ -6,6 +6,7 @@ import { exportToPDF } from '../utils/exportPDF';
 
 const Buses = () => {
   const [buses, setBuses] = useState([]);
+  const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -14,41 +15,49 @@ const Buses = () => {
   // Filters
   const [filterType, setFilterType] = useState('ALL');
   const [filterUnassigned, setFilterUnassigned] = useState(false);
+  const [filterStatus, setFilterStatus] = useState('ALL');
 
   const notify = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   };
 
-  const fetchBuses = useCallback(async () => {
+  const fetchBusesAndRoutes = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('buses')
-        .select(`id, vehicle_reg_number, ntc_number, bus_type, total_seats, status, driver_profiles ( profiles ( full_name ) )`);
-      if (error) throw error;
-      setBuses((data || []).map(b => ({
+      const [busesRes, routesRes] = await Promise.all([
+        supabase.from('buses').select(`id, vehicle_reg_number, ntc_number, bus_type, total_seats, status, route_id, driver_profiles ( profiles ( full_name ) ), routes ( route_number, origin, destination )`),
+        supabase.from('routes').select('id, route_number, origin, destination')
+      ]);
+
+      if (busesRes.error) throw busesRes.error;
+      if (routesRes.error) throw routesRes.error;
+
+      setRoutes(routesRes.data || []);
+      setBuses((busesRes.data || []).map(b => ({
         ...b,
-        driver_name: b.driver_profiles?.profiles?.full_name || 'Unassigned'
+        driver_name: b.driver_profiles?.profiles?.full_name || 'Unassigned',
+        route_display: b.routes ? `${b.routes.route_number} (${b.routes.origin}-${b.routes.destination})` : 'Unassigned'
       })));
     } catch (err) {
-      console.error('Error fetching buses:', err.message);
+      console.error('Error fetching fleet data:', err.message);
       notify('Error loading fleet data', 'error');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchBuses(); }, [fetchBuses]);
+  useEffect(() => { fetchBusesAndRoutes(); }, [fetchBusesAndRoutes]);
 
   // Apply filters
   const filteredBuses = buses.filter(b => {
     if (filterType !== 'ALL' && b.bus_type !== filterType) return false;
     if (filterUnassigned && b.driver_name !== 'Unassigned') return false;
+    if (filterStatus !== 'ALL' && b.status !== filterStatus) return false;
     return true;
   });
 
-  const openAdd = () => setModal({ mode: 'add', data: { vehicle_reg_number: '', ntc_number: '', bus_type: 'INTERCITY', total_seats: 42, status: 'ACTIVE' } });
+  const openAdd = () => setModal({ mode: 'add', data: { vehicle_reg_number: '', ntc_number: '', bus_type: 'INTERCITY', total_seats: 42, status: 'ACTIVE', route_id: '' } });
   const openEdit = (row) => setModal({ mode: 'edit', data: { ...row } });
 
   const handleSave = async (e) => {
@@ -56,29 +65,26 @@ const Buses = () => {
     setSubmitting(true);
     const d = modal.data;
     try {
+      const payload = {
+        vehicle_reg_number: d.vehicle_reg_number,
+        ntc_number: d.ntc_number,
+        bus_type: d.bus_type,
+        total_seats: Number(d.total_seats),
+        status: d.status,
+        route_id: d.route_id || null,
+      };
+
       if (modal.mode === 'add') {
-        const { error } = await supabase.from('buses').insert([{
-          vehicle_reg_number: d.vehicle_reg_number,
-          ntc_number: d.ntc_number,
-          bus_type: d.bus_type,
-          total_seats: Number(d.total_seats),
-          status: d.status,
-        }]);
+        const { error } = await supabase.from('buses').insert([payload]);
         if (error) throw error;
         notify('Bus added successfully!');
       } else {
-        const { error } = await supabase.from('buses').update({
-          vehicle_reg_number: d.vehicle_reg_number,
-          ntc_number: d.ntc_number,
-          bus_type: d.bus_type,
-          total_seats: Number(d.total_seats),
-          status: d.status,
-        }).eq('id', d.id);
+        const { error } = await supabase.from('buses').update(payload).eq('id', d.id);
         if (error) throw error;
         notify('Bus updated successfully!');
       }
       setModal(null);
-      fetchBuses();
+      fetchBusesAndRoutes();
     } catch (err) {
       notify('Save failed (RLS): ' + err.message, 'error');
     } finally {
@@ -92,9 +98,21 @@ const Buses = () => {
       const { error } = await supabase.from('buses').delete().eq('id', row.id);
       if (error) throw error;
       notify('Bus deleted');
-      fetchBuses();
+      fetchBusesAndRoutes();
     } catch (err) {
       notify('Delete failed: ' + err.message, 'error');
+    }
+  };
+
+  const handleBulkDelete = async (selectedIds) => {
+    if (!window.confirm(`Delete ${selectedIds.length} selected buses?`)) return;
+    try {
+      const { error } = await supabase.from('buses').delete().in('id', selectedIds);
+      if (error) throw error;
+      notify('Selected buses deleted');
+      fetchBusesAndRoutes();
+    } catch (err) {
+      notify('Bulk delete failed: ' + err.message, 'error');
     }
   };
 
@@ -105,6 +123,7 @@ const Buses = () => {
     { header: 'NTC No', accessor: 'ntc_number' },
     { header: 'Type', accessor: 'bus_type', render: (v) => <span className={`b-badge ${(v||'').toLowerCase()}`}>{v}</span> },
     { header: 'Seats', accessor: 'total_seats', width: '80px' },
+    { header: 'Assigned Route', accessor: 'route_display', render: (v) => <span className={v === 'Unassigned' ? 'b-unassigned' : ''}>{v}</span> },
     { header: 'Status', accessor: 'status', render: (v) => <span className={`b-status ${(v||'').toLowerCase()}`}>{v}</span> },
     { header: 'Driver', accessor: 'driver_name', render: (v) => <span className={v === 'Unassigned' ? 'b-unassigned' : ''}>{v}</span> },
   ];
@@ -123,7 +142,7 @@ const Buses = () => {
   const tableActions = (
     <>
       <button className="btn btn-secondary" onClick={() => exportToPDF('Fleet_Management', pdfColumns, filteredBuses)}><FileDown size={14} /> Export PDF</button>
-      <button className="btn btn-secondary" onClick={fetchBuses}><RefreshCw size={14} /> Refresh</button>
+      <button className="btn btn-secondary" onClick={fetchBusesAndRoutes}><RefreshCw size={14} /> Refresh</button>
       <button className="btn btn-primary" onClick={openAdd}><Plus size={14} /> Add Bus</button>
     </>
   );
@@ -145,6 +164,15 @@ const Buses = () => {
             </select>
           </div>
           <div className="filter-group">
+            <label>Status</label>
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+              <option value="ALL">All Statuses</option>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="MAINT">MAINTENANCE</option>
+              <option value="INACTIVE">INACTIVE</option>
+            </select>
+          </div>
+          <div className="filter-group">
             <label className="filter-check">
               <input
                 type="checkbox"
@@ -154,8 +182,8 @@ const Buses = () => {
               <span>Unassigned Only</span>
             </label>
           </div>
-          {(filterType !== 'ALL' || filterUnassigned) && (
-            <button className="filter-clear" onClick={() => { setFilterType('ALL'); setFilterUnassigned(false); }}>
+          {(filterType !== 'ALL' || filterUnassigned || filterStatus !== 'ALL') && (
+            <button className="filter-clear" onClick={() => { setFilterType('ALL'); setFilterUnassigned(false); setFilterStatus('ALL'); }}>
               <X size={14} /> Clear
             </button>
           )}
@@ -165,7 +193,15 @@ const Buses = () => {
       {loading ? (
         <div className="loading-state">Loading fleet data...</div>
       ) : (
-        <DataTable title="Fleet Management" columns={columns} data={filteredBuses} actions={tableActions} onEdit={openEdit} onDelete={handleDelete} />
+        <DataTable
+          title="Fleet Management"
+          columns={columns}
+          data={filteredBuses}
+          actions={tableActions}
+          onEdit={openEdit}
+          onDelete={handleDelete}
+          onBulkDelete={handleBulkDelete}
+        />
       )}
 
       {modal && (
@@ -184,6 +220,14 @@ const Buses = () => {
                 </select>
               </div>
               <div className="fg"><label>Total Seats</label><input type="number" value={modal.data.total_seats} onChange={e => updateField('total_seats', e.target.value)} required /></div>
+              <div className="fg"><label>Assign Route</label>
+                <select value={modal.data.route_id || ''} onChange={e => updateField('route_id', e.target.value)}>
+                  <option value="">-- Unassigned --</option>
+                  {routes.map(r => (
+                    <option key={r.id} value={r.id}>{r.route_number} ({r.origin} - {r.destination})</option>
+                  ))}
+                </select>
+              </div>
               <div className="fg"><label>Status</label>
                 <select value={modal.data.status} onChange={e => updateField('status', e.target.value)}>
                   <option value="ACTIVE">ACTIVE</option><option value="MAINT">MAINTENANCE</option><option value="INACTIVE">INACTIVE</option>

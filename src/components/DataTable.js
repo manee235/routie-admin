@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, ChevronLeft, ChevronRight, MoreVertical, Edit, Trash2, Eye } from 'lucide-react';
 
-const DataTable = ({ title, columns, data, actions, onEdit, onDelete, onView }) => {
+const DataTable = ({ title, columns, data, actions, onEdit, onDelete, onView, onBulkDelete }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [openMenuRow, setOpenMenuRow] = useState(null);
+  const [selectedRowIds, setSelectedRowIds] = useState(new Set());
   const rowsPerPage = 10;
 
   const filteredData = data.filter(row =>
@@ -19,9 +20,45 @@ const DataTable = ({ title, columns, data, actions, onEdit, onDelete, onView }) 
   const startIdx = (currentPage - 1) * rowsPerPage;
   const paginatedData = filteredData.slice(startIdx, startIdx + rowsPerPage);
 
+  useEffect(() => {
+    setSelectedRowIds(new Set());
+  }, [data, searchTerm, currentPage]);
+
+  const paginatedKeys = paginatedData.map((row, idx) => row.id !== undefined ? row.id : startIdx + idx);
+  const areAllSelected = paginatedKeys.length > 0 && paginatedKeys.every(key => selectedRowIds.has(key));
+
+  const handleSelectAll = (e) => {
+    const checked = e.target.checked;
+    setSelectedRowIds(prev => {
+      const next = new Set(prev);
+      paginatedKeys.forEach(key => {
+        if (checked) {
+          next.add(key);
+        } else {
+          next.delete(key);
+        }
+      });
+      return next;
+    });
+  };
+
+  const handleSelectRow = (key) => {
+    setSelectedRowIds(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   const handleMenuToggle = (idx) => {
     setOpenMenuRow(openMenuRow === idx ? null : idx);
   };
+
+  const showActionsCell = onEdit || onDelete || onView;
 
   return (
     <div className="dt-container ov-card">
@@ -30,76 +67,110 @@ const DataTable = ({ title, columns, data, actions, onEdit, onDelete, onView }) 
           <h3>{title}</h3>
           <span className="dt-count">{filteredData.length} Total</span>
         </div>
-        <div className="dt-actions-area">
-          <div className="dt-search">
-            <Search size={15} />
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            />
+        {onBulkDelete && selectedRowIds.size > 0 ? (
+          <div className="dt-bulk-actions">
+            <span className="dt-bulk-count">{selectedRowIds.size} Selected</span>
+            <button className="btn btn-danger dt-bulk-delete-btn" onClick={() => {
+              onBulkDelete(Array.from(selectedRowIds));
+            }}>
+              <Trash2 size={14} /> Delete Selected
+            </button>
           </div>
-          {actions}
-        </div>
+        ) : (
+          <div className="dt-actions-area">
+            <div className="dt-search">
+              <Search size={15} />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              />
+            </div>
+            {actions}
+          </div>
+        )}
       </div>
 
       <div className="dt-table-wrap">
         <table className="dt-table">
           <thead>
             <tr>
+              {onBulkDelete && (
+                <th style={{ width: '40px' }}>
+                  <input
+                    type="checkbox"
+                    className="dt-checkbox"
+                    checked={areAllSelected}
+                    onChange={handleSelectAll}
+                  />
+                </th>
+              )}
               {columns.map((col, idx) => (
                 <th key={idx} style={{ width: col.width }}>{col.header}</th>
               ))}
-              {(onEdit || onDelete || onView) && <th style={{ width: '50px' }}></th>}
+              {showActionsCell && <th style={{ width: '50px' }}></th>}
             </tr>
           </thead>
           <tbody>
             {paginatedData.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + 1} className="dt-empty">
+                <td colSpan={columns.length + (onBulkDelete ? 1 : 0) + (showActionsCell ? 1 : 0)} className="dt-empty">
                   No records found
                 </td>
               </tr>
             ) : (
-              paginatedData.map((row, rowIdx) => (
-                <tr key={rowIdx}>
-                  {columns.map((col, colIdx) => (
-                    <td key={colIdx}>
-                      {col.render ? col.render(row[col.accessor], row) : (row[col.accessor] ?? '—')}
-                    </td>
-                  ))}
-                  {(onEdit || onDelete || onView) && (
-                    <td className="dt-actions-cell">
-                      <button
-                        className="dt-menu-btn"
-                        onClick={() => handleMenuToggle(startIdx + rowIdx)}
-                      >
-                        <MoreVertical size={16} />
-                      </button>
-                      {openMenuRow === (startIdx + rowIdx) && (
-                        <div className={`dt-dropdown ${rowIdx > 0 && rowIdx >= paginatedData.length - 2 ? 'up' : ''}`}>
-                          {onView && (
-                            <button onClick={() => { onView(row); setOpenMenuRow(null); }}>
-                              <Eye size={14} /> View
-                            </button>
-                          )}
-                          {onEdit && (
-                            <button onClick={() => { onEdit(row); setOpenMenuRow(null); }}>
-                              <Edit size={14} /> Edit
-                            </button>
-                          )}
-                          {onDelete && (
-                            <button className="dt-delete-btn" onClick={() => { onDelete(row); setOpenMenuRow(null); }}>
-                              <Trash2 size={14} /> Delete
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              ))
+              paginatedData.map((row, rowIdx) => {
+                const rowKey = row.id !== undefined ? row.id : startIdx + rowIdx;
+                return (
+                  <tr key={row.id ?? rowIdx}>
+                    {onBulkDelete && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          className="dt-checkbox"
+                          checked={selectedRowIds.has(rowKey)}
+                          onChange={() => handleSelectRow(rowKey)}
+                        />
+                      </td>
+                    )}
+                    {columns.map((col, colIdx) => (
+                      <td key={colIdx}>
+                        {col.render ? col.render(row[col.accessor], row) : (row[col.accessor] ?? '—')}
+                      </td>
+                    ))}
+                    {showActionsCell && (
+                      <td className="dt-actions-cell">
+                        <button
+                          className="dt-menu-btn"
+                          onClick={() => handleMenuToggle(startIdx + rowIdx)}
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                        {openMenuRow === (startIdx + rowIdx) && (
+                          <div className={`dt-dropdown ${rowIdx > 0 && rowIdx >= paginatedData.length - 2 ? 'up' : ''}`}>
+                            {onView && (
+                              <button onClick={() => { onView(row); setOpenMenuRow(null); }}>
+                                <Eye size={14} /> View
+                              </button>
+                            )}
+                            {onEdit && (
+                              <button onClick={() => { onEdit(row); setOpenMenuRow(null); }}>
+                                <Edit size={14} /> Edit
+                              </button>
+                            )}
+                            {onDelete && (
+                              <button className="dt-delete-btn" onClick={() => { onDelete(row); setOpenMenuRow(null); }}>
+                                <Trash2 size={14} /> Delete
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -190,19 +261,23 @@ const DataTable = ({ title, columns, data, actions, onEdit, onDelete, onView }) 
           color: var(--text-muted);
         }
         .dt-search input {
-          width: 200px;
-          padding: 8px 12px 8px 36px;
-          border-radius: var(--radius-sm);
+          width: 220px;
+          padding: 10px 16px 10px 40px;
+          border-radius: 40px;
           border: 1px solid var(--border);
           background: var(--bg-main);
           color: var(--text-main);
           font-size: 13px;
-          font-family: inherit;
-          transition: var(--transition);
+          font-weight: 500;
+          font-family: 'Outfit', sans-serif;
+          transition: all 0.2s ease;
+          box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
         }
         .dt-search input:focus {
           outline: none;
           border-color: var(--primary);
+          box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.15);
+          background: var(--bg-card);
         }
 
         .dt-table-wrap {
@@ -355,6 +430,31 @@ const DataTable = ({ title, columns, data, actions, onEdit, onDelete, onView }) 
         .dt-pg-btn:disabled {
           opacity: 0.4;
           cursor: not-allowed;
+        }
+
+        .dt-bulk-actions {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          animation: dtSlideDown 0.2s ease;
+        }
+        .dt-bulk-count {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text-main);
+        }
+        .dt-bulk-delete-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 16px;
+          font-size: 13px;
+          font-weight: 600;
+          border-radius: var(--radius-sm);
+        }
+        @keyframes dtSlideDown {
+          from { transform: translateY(-10px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
 
         @media (max-width: 768px) {

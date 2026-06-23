@@ -13,6 +13,7 @@ import RoutesPage from './pages/Routes';
 import Bookings from './pages/Bookings';
 import BusRequests from './pages/BusRequests';
 import Settings from './pages/Settings';
+import LiveTracking from './pages/LiveTracking';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -42,7 +43,8 @@ function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<Overview />} />
+              <Route index element={<LiveTracking />} />
+              <Route path="overview" element={<Overview />} />
               <Route path="users" element={<Users />} />
               <Route path="buses" element={<Buses />} />
               <Route path="schedules" element={<Schedules />} />
@@ -50,6 +52,7 @@ function App() {
               <Route path="bookings" element={<Bookings />} />
               <Route path="bus-requests" element={<BusRequests />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="live-tracking" element={<LiveTracking />} />
             </Route>
           </Routes>
         </BrowserRouter>

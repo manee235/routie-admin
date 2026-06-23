@@ -76,6 +76,18 @@ const Bookings = () => {
     }
   };
 
+  const handleBulkDelete = async (selectedIds) => {
+    if (!window.confirm(`Cancel ${selectedIds.length} selected bookings?`)) return;
+    try {
+      const { error } = await supabase.from('bookings').update({ status: 'CANCELLED' }).in('id', selectedIds);
+      if (error) throw error;
+      notify('Selected bookings cancelled');
+      fetchBookings();
+    } catch (err) {
+      notify('Failed: ' + err.message, 'error');
+    }
+  };
+
   const columns = [
     { header: 'Ref ID', accessor: 'booking_reference', width: '120px' },
     { header: 'Passenger', accessor: 'passenger_name' },
@@ -116,7 +128,15 @@ const Bookings = () => {
       {loading ? (
         <div className="loading-state">Loading bookings...</div>
       ) : (
-        <DataTable title="Ticket Bookings" columns={columns} data={bookings} actions={tableActions} onEdit={openEdit} onDelete={handleDelete} />
+        <DataTable
+          title="Ticket Bookings"
+          columns={columns}
+          data={bookings}
+          actions={tableActions}
+          onEdit={openEdit}
+          onDelete={handleDelete}
+          onBulkDelete={handleBulkDelete}
+        />
       )}
 
       {modal && (

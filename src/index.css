@@ -169,36 +169,65 @@ ul {
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 9px 18px;
-  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  border-radius: 12px;
   font-size: 13px;
   font-weight: 600;
-  transition: var(--transition);
+  font-family: 'Outfit', sans-serif;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
+  letter-spacing: 0.02em;
 }
 
 .btn-primary {
   background: var(--primary);
   color: white;
-  box-shadow: 0 2px 8px rgba(0, 102, 255, 0.25);
+  border: 1px solid transparent;
+  box-shadow: 0 4px 12px rgba(0, 102, 255, 0.25);
 }
 .btn-primary:hover {
   background: var(--primary-dark);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 102, 255, 0.35);
+  box-shadow: 0 6px 16px rgba(0, 102, 255, 0.35);
 }
 
 .btn-secondary {
-  background: var(--bg-card);
+  background: transparent;
   color: var(--text-main);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 .btn-secondary:hover {
-  background: var(--primary-light);
-  color: var(--primary);
-  border-color: var(--primary);
+  background: var(--bg-main);
+  color: var(--text-main);
+  border-color: var(--text-muted);
+  box-shadow: var(--shadow-md);
 }
+
+.btn-danger {
+  background: var(--accent-red);
+  color: white;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);
+}
+.btn-danger:hover {
+  background: #DC2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
+}
+
+/* Checkbox Style */
+.dt-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  transition: var(--transition);
+}
+
 
 /* ─── Loading State ─── */
 .loading-state {

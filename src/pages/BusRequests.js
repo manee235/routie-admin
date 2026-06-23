@@ -3,16 +3,16 @@ import DataTable from '../components/DataTable';
 import { Check, X as XIcon, RefreshCw } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
+const seedData = [
+  { id: '1', driver_name: 'Sunil Shantha', bus_reg: 'WP NB-4521', status: 'PENDING', driver_note: 'My regular bus is in maintenance.', created_at: '2026-05-04' },
+  { id: '2', driver_name: 'Kamal Perera', bus_reg: 'SP ND-1209', status: 'APPROVED', driver_note: 'Requesting for the long trip.', created_at: '2026-05-02' },
+  { id: '3', driver_name: 'Nimal Silva', bus_reg: 'CP NA-3321', status: 'REJECTED', driver_note: 'Need a bus with more seats.', created_at: '2026-05-01' },
+];
+
 const BusRequests = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
-
-  const seedData = [
-    { id: '1', driver_name: 'Sunil Shantha', bus_reg: 'WP NB-4521', status: 'PENDING', driver_note: 'My regular bus is in maintenance.', created_at: '2026-05-04' },
-    { id: '2', driver_name: 'Kamal Perera', bus_reg: 'SP ND-1209', status: 'APPROVED', driver_note: 'Requesting for the long trip.', created_at: '2026-05-02' },
-    { id: '3', driver_name: 'Nimal Silva', bus_reg: 'CP NA-3321', status: 'REJECTED', driver_note: 'Need a bus with more seats.', created_at: '2026-05-01' },
-  ];
 
   const notify = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -22,17 +22,50 @@ const BusRequests = () => {
   const fetchRequests = React.useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: requestsData, error: requestsError } = await supabase
         .from('bus_assignment_requests')
-        .select('*');
-      if (error) throw error;
-      setRequests(data && data.length > 0 ? data : seedData);
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (requestsError) throw requestsError;
+
+      const rows = requestsData || [];
+      if (rows.length === 0) {
+        setRequests(seedData);
+        return;
+      }
+
+      const driverIds = [...new Set(rows.filter(r => r.driver_id).map(r => r.driver_id))];
+      const busIds = [...new Set(rows.filter(r => r.bus_id).map(r => r.bus_id))];
+
+      const [driverResult, busResult] = await Promise.all([
+        driverIds.length > 0
+          ? supabase.from('profiles').select('id, full_name').in('id', driverIds)
+          : Promise.resolve({ data: [] }),
+        busIds.length > 0
+          ? supabase.from('buses').select('id, vehicle_reg_number').in('id', busIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const driverMap = (driverResult.data || []).reduce((acc, driver) => {
+        acc[driver.id] = driver.full_name;
+        return acc;
+      }, {});
+      const busMap = (busResult.data || []).reduce((acc, bus) => {
+        acc[bus.id] = bus.vehicle_reg_number;
+        return acc;
+      }, {});
+
+      setRequests(rows.map(r => ({
+        ...r,
+        driver_name: r.driver_name || driverMap[r.driver_id] || 'Unknown driver',
+        bus_reg: r.bus_reg || busMap[r.bus_id] || 'Unknown bus',
+      })));
     } catch {
       setRequests(seedData);
     } finally {
       setLoading(false);
     }
-  }, [seedData]);
+  }, []);
 
   useEffect(() => { fetchRequests(); }, [fetchRequests]);
 
@@ -49,6 +82,19 @@ const BusRequests = () => {
       // Fallback: update local state
       setRequests(prev => prev.map(r => r.id === row.id ? { ...r, status: newStatus } : r));
       notify(`Request ${newStatus.toLowerCase()} (local)`, 'success');
+    }
+  };
+
+  const handleBulkDelete = async (selectedIds) => {
+    if (!window.confirm(`Delete ${selectedIds.length} selected requests?`)) return;
+    try {
+      const { error } = await supabase.from('bus_assignment_requests').delete().in('id', selectedIds);
+      if (error) throw error;
+      notify('Selected requests deleted');
+      fetchRequests();
+    } catch (err) {
+      setRequests(prev => prev.filter(r => !selectedIds.includes(r.id)));
+      notify('Removed locally', 'success');
     }
   };
 
@@ -95,7 +141,13 @@ const BusRequests = () => {
       {loading ? (
         <div className="loading-state">Loading requests...</div>
       ) : (
-        <DataTable title="Bus Assignment Requests" columns={columns} data={requests} actions={tableActions} />
+        <DataTable
+          title="Bus Assignment Requests"
+          columns={columns}
+          data={requests}
+          actions={tableActions}
+          onBulkDelete={handleBulkDelete}
+        />
       )}
 
       <style jsx>{`

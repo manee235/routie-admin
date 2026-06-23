@@ -107,6 +107,20 @@ const RoutesPage = () => {
     }
   };
 
+  const handleBulkDelete = async (selectedIds) => {
+    if (!window.confirm(`Delete ${selectedIds.length} selected routes?`)) return;
+    try {
+      const { error } = await supabase.from('routes').delete().in('id', selectedIds);
+      if (error) throw error;
+      notify('Selected routes deleted!');
+      fetchRoutes();
+    } catch (err) {
+      // Fallback: remove from local state
+      setRoutes(prev => prev.filter(r => !selectedIds.includes(r.id)));
+      notify('Removed locally', 'warning');
+    }
+  };
+
   const columns = [
     { header: 'Route No', accessor: 'route_number', width: '100px' },
     { header: 'Route Name', accessor: 'route_name' },
@@ -145,7 +159,15 @@ const RoutesPage = () => {
       {loading ? (
         <div className="loading-state">Loading routes...</div>
       ) : (
-        <DataTable title="Route Network" columns={columns} data={routes} actions={tableActions} onEdit={openEdit} onDelete={handleDelete} />
+        <DataTable
+          title="Route Network"
+          columns={columns}
+          data={routes}
+          actions={tableActions}
+          onEdit={openEdit}
+          onDelete={handleDelete}
+          onBulkDelete={handleBulkDelete}
+        />
       )}
 
       {modal && (
@@ -177,9 +199,9 @@ const RoutesPage = () => {
       )}
 
       <style jsx>{`
-        .rt-pill { padding: 3px 10px; border-radius: 8px; font-size: 11px; font-weight: 700; }
-        .rt-pill.active { background: #10B981; color: #ffffffff; }
-        .rt-pill.inactive { background: var(--border-light); color: var(--text-secondary); }
+        .rt-pill { padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-block; letter-spacing: 0.02em; }
+        .rt-pill.active { background: rgba(16, 185, 129, 0.12); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.2); }
+        .rt-pill.inactive { background: rgba(148, 163, 184, 0.12); color: var(--text-muted); border: 1px solid rgba(148, 163, 184, 0.2); }
 
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 2000; }
         .modal-box { width: 100%; max-width: 500px; padding: 28px; margin: 16px; }

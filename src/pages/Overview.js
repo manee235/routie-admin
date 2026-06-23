@@ -1,87 +1,111 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import { motion } from 'framer-motion';
 import { supabase } from '../supabaseClient';
-import { useTheme } from '../context/ThemeContext';
 import {
-  Search,
-  ChevronDown,
-  TrendingUp,
   Bus,
-  MapPin,
-  Phone,
-  MessageSquare,
-  DollarSign,
   Ticket,
   ArrowUpRight,
   BarChart3,
   Activity,
-  Maximize2,
-  Minus,
-  Plus
+  DollarSign,
+  Users,
+  Calendar,
+  CreditCard,
+  Volume2
 } from 'lucide-react';
 import {
-  BarChart,
-  Bar,
   XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   ResponsiveContainer,
   Cell,
   AreaChart,
-  Area
+  Area,
+  PieChart,
+  Pie,
+  LineChart,
+  Line
 } from 'recharts';
-
-// Fix for default Leaflet markers
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
-  iconUrl: require('leaflet/dist/images/marker-icon.png'),
-  shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
-});
-
-// Custom bus marker icon
-const busIcon = new L.Icon({
-  iconUrl: '/bus.svg',
-  iconSize: [40, 40],
-  iconAnchor: [20, 20],
-  popupAnchor: [0, -20]
-});
-
-const revenueData = [
-  { name: 'Mar', val: 1200 }, { name: 'Apr', val: 900 },
-  { name: 'May', val: 1800 }, { name: 'Jun', val: 1400 },
-  { name: 'Jul', val: 2200 }, { name: 'Aug', val: 1900 },
-  { name: 'Sep', val: 2800 }, { name: 'Oct', val: 2400 },
-  { name: 'Nov', val: 3100 },
-];
-
-const sparkData = [
-  { v: 30 }, { v: 45 }, { v: 35 }, { v: 60 }, { v: 50 },
-  { v: 70 }, { v: 55 }, { v: 80 }, { v: 65 }, { v: 90 },
-  { v: 75 }, { v: 85 },
-];
+import { generateNarration, playAudio } from '../services/aiService';
 
 const Overview = () => {
-  const { isDarkMode } = useTheme();
+  const [narrating, setNarrating] = useState(false);
   const [stats, setStats] = useState({
     passengers: 0, buses: 0, bookings: 0, revenue: 0
   });
   const [loading, setLoading] = useState(true);
-  
-  // Realtime Live Trips State
-  const [liveTrips, setLiveTrips] = useState([]);
-  const [selectedTrip, setSelectedTrip] = useState(null);
+
+  // Dynamic Chart States
+  const [chartRevenueData, setChartRevenueData] = useState([]);
+  const [chartTrafficData, setChartTrafficData] = useState([]);
+  const [chartBusStatusData, setChartBusStatusData] = useState([]);
+  const [recentTransactions, setRecentTransactions] = useState([]);
+  const [activeBusesList, setActiveBusesList] = useState([]);
 
   useEffect(() => {
-    // 1. Fetch Stats
     const fetchStats = async () => {
       try {
+        // 1. Basic Counts
         const { count: passengerCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'PASSENGER');
         const { count: busCount } = await supabase.from('buses').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE');
         const { count: bookingCount } = await supabase.from('bookings').select('*', { count: 'exact', head: true });
-        const { data: revenueRows } = await supabase.from('bookings').select('total_fare').in('status', ['CONFIRMED', 'SCANNED']);
-        const totalRevenue = revenueRows?.reduce((acc, c) => acc + Number(c.total_fare), 0) || 0;
+        
+        // 2. Revenue & Traffic Data from Bookings
+        const { data: revenueRows } = await supabase.from('bookings').select('created_at, total_fare').in('status', ['CONFIRMED', 'SCANNED']);
+        
+        const totalRevenue = revenueRows?.reduce((acc, c) => acc + Number(c.total_fare || 0), 0) || 0;
+        
+        // Aggregate Revenue by Month
+        const revMap = {};
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        months.forEach(m => revMap[m] = 0);
+        
+        // Aggregate Traffic by Hour
+        const trafficMap = {};
+
+        revenueRows?.forEach(r => {
+           const d = new Date(r.created_at);
+           const m = months[d.getMonth()];
+           revMap[m] += Number(r.total_fare || 0);
+
+           const hr = d.getHours().toString().padStart(2, '0') + ':00';
+           trafficMap[hr] = (trafficMap[hr] || 0) + 1;
+        });
+
+        setChartRevenueData(months.map(m => ({ name: m, val: revMap[m] })));
+        
+        const tData = Object.keys(trafficMap).sort().map(k => ({ time: k, passengers: trafficMap[k] }));
+        // If empty, supply a flatline to prevent chart crash
+        setChartTrafficData(tData.length > 0 ? tData : [{ time: '00:00', passengers: 0 }]);
+
+        // 3. Bus Status Data
+        const { data: busData } = await supabase.from('buses').select('status');
+        const stMap = {};
+        busData?.forEach(b => {
+          const s = (b.status || 'UNKNOWN').toUpperCase();
+          stMap[s] = (stMap[s] || 0) + 1;
+        });
+        setChartBusStatusData([
+          { name: 'In Transit', value: stMap['ACTIVE'] || 0, color: '#6366F1' },
+          { name: 'Maintenance', value: stMap['MAINTENANCE'] || 0, color: '#EF4444' },
+          { name: 'Available', value: stMap['AVAILABLE'] || 0, color: '#10B981' }
+        ]);
+
+        // 4. Recent Transactions
+        const { data: recentBk } = await supabase.from('bookings')
+          .select(`id, booking_reference, total_fare, trip_schedules(routes(origin, destination))`)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        setRecentTransactions(recentBk || []);
+
+        // 5. Active Buses List
+        const { data: aBuses } = await supabase.from('buses')
+          .select('vehicle_reg_number, bus_type, routes(route_name, origin, destination)')
+          .eq('status', 'ACTIVE')
+          .limit(5);
+        setActiveBusesList(aBuses || []);
+
         setStats({ passengers: passengerCount || 0, buses: busCount || 0, bookings: bookingCount || 0, revenue: totalRevenue });
       } catch (error) {
         console.error('Error fetching stats:', error);
@@ -89,727 +113,517 @@ const Overview = () => {
         setLoading(false);
       }
     };
-
-    // 2. Fetch Live Trips
-    const fetchLiveTrips = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('trip_schedules')
-          .select(`id, live_lat, live_lng, driver_id, buses ( vehicle_reg_number ), routes ( route_name )`)
-          .eq('status', 'LIVE');
-          
-        if (!error && data) {
-          const driverIds = [...new Set(data.filter(s => s.driver_id).map(s => s.driver_id))];
-          let driverMap = {};
-          if (driverIds.length > 0) {
-            const { data: dData } = await supabase.from('profiles').select('id, full_name').in('id', driverIds);
-            (dData || []).forEach(d => { driverMap[d.id] = d.full_name; });
-          }
-
-          const parsed = data.map(s => ({
-            id: s.id,
-            lat: Number(s.live_lat) || 7.8731,
-            lng: Number(s.live_lng) || 80.7718,
-            regNumber: s.buses?.vehicle_reg_number || 'Unknown Bus',
-            driverName: driverMap[s.driver_id] || 'Unassigned',
-            routeName: s.routes?.route_name || 'Unknown Route'
-          }));
-          
-          setLiveTrips(parsed);
-          if (parsed.length > 0) {
-            setSelectedTrip(curr => curr ? parsed.find(p => p.id === curr.id) || parsed[0] : parsed[0]);
-          } else {
-            setSelectedTrip(null);
-          }
-        }
-      } catch (e) {
-        console.error('Error fetching live trips:', e);
-      }
-    };
-
     fetchStats();
-    fetchLiveTrips();
-
-    // 3. Subscribe to Realtime Location Updates
-    const channel = supabase.channel('live_locations_overview')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trip_schedules' }, payload => {
-        const newRow = payload.new;
-        if (newRow.status === 'LIVE') {
-          setLiveTrips(prev => {
-            const idx = prev.findIndex(t => t.id === newRow.id);
-            if (idx >= 0) {
-              const updated = [...prev];
-              updated[idx] = { ...updated[idx], lat: Number(newRow.live_lat), lng: Number(newRow.live_lng) };
-              setSelectedTrip(curr => curr?.id === newRow.id ? updated[idx] : curr);
-              return updated;
-            } else {
-              // A new trip went live, re-fetch to get relations (driver name, bus reg, etc)
-              fetchLiveTrips();
-              return prev;
-            }
-          });
-        } else if (newRow.status === 'COMPLETED' || newRow.status === 'CANCELLED') {
-          setLiveTrips(prev => {
-            const updated = prev.filter(t => t.id !== newRow.id);
-            setSelectedTrip(curr => curr?.id === newRow.id ? (updated[0] || null) : curr);
-            return updated;
-          });
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
-  const tileUrl = isDarkMode
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+  const StatCard = ({ title, value, subtitle, icon: Icon, color, trend }) => (
+    <motion.div className="stat-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="stat-card-icon" style={{ backgroundColor: `${color}15`, color }}>
+        <Icon size={22} />
+      </div>
+      <div className="stat-card-content">
+        <h3>{title}</h3>
+        <h2>{loading ? '...' : value}</h2>
+        <div className="stat-card-footer">
+          <span className={`trend ${trend >= 0 ? 'up' : 'down'}`}>
+            <ArrowUpRight size={14} className={trend < 0 ? 'rotate-180' : ''} />
+            {Math.abs(trend)}%
+          </span>
+          <span className="subtitle">{subtitle}</span>
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="chart-tooltip">
+          <p className="label">{label}</p>
+          <p className="value">
+            {payload[0].name === 'val' ? 'Rs.' : ''}
+            {payload[0].value.toLocaleString()}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const handleNarrate = async () => {
+    setNarrating(true);
+    try {
+      const prompt = `You are a helpful AI assistant for the Routie Fleet Management System. Summarize the following Dashboard Analytics in a very concise, conversational, and energetic tone (under 2 sentences). Total Revenue: Rs ${stats.revenue.toLocaleString()}, Total Bookings: ${stats.bookings.toLocaleString()}, Active Fleet: ${stats.buses}.`;
+      const text = await generateNarration(prompt);
+      playAudio(text);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setNarrating(false);
+    }
+  };
 
   return (
-    <div className="overview">
-      {/* ═══════════ MAP SECTION ═══════════ */}
-      <div className="map-section">
-        <div className="map-overlay-controls">
-          <div className="map-search-bar">
-            <Search size={16} />
-            <input type="text" placeholder="Colombo, Sri Lanka" />
-          </div>
-          <div className="map-filter-pill">
-            <span>Sort by</span>
-            <strong>In Transit</strong>
-            <ChevronDown size={14} />
-          </div>
+    <div className="analytics-dashboard">
+      <div className="dashboard-header">
+        <div>
+          <h1 className="page-title">Analytics Overview</h1>
+          <p className="page-subtitle">Monitor your system performance and metrics</p>
         </div>
-
-        <MapContainer
-          center={selectedTrip ? [selectedTrip.lat, selectedTrip.lng] : [7.8731, 80.7718]}
-          zoom={selectedTrip ? 12 : 7}
-          scrollWheelZoom={true}
-          style={{ height: '100%', width: '100%' }}
-          key={selectedTrip?.id || 'map'}
-          zoomControl={false}
-        >
-          <TileLayer
-            url={tileUrl}
-            attribution='&copy; <a href="https://www.openstreetmap.org">OSM</a>'
-          />
-          {liveTrips.map((trip) => (
-            <Marker
-              key={trip.id}
-              position={[trip.lat, trip.lng]}
-              icon={busIcon}
-              eventHandlers={{
-                click: () => {
-                  setSelectedTrip(trip);
-                },
-              }}
-            >
-              <Popup>
-                <strong>{trip.regNumber}</strong><br />
-                {trip.routeName}<br />
-                <em>{trip.driverName}</em>
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
-
-        <div className="map-corner-controls">
-          <button className="map-ctrl-btn"><Maximize2 size={16} /></button>
-          <button className="map-ctrl-btn"><Plus size={16} /></button>
-          <button className="map-ctrl-btn"><Minus size={16} /></button>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px', height: 42, background: 'var(--primary)' }} onClick={handleNarrate} disabled={narrating || loading}>
+            <Volume2 size={16} />
+            {narrating ? 'Generating...' : 'AI Insights'}
+          </button>
+          <div className="date-picker-btn">
+            <Calendar size={16} />
+            <span>Last 30 Days</span>
+          </div>
         </div>
       </div>
 
-      {/* ═══════════ CARDS GRID ═══════════ */}
-      <div className="cards-grid">
+      {/* ─── Top Stats Grid ─── */}
+      <div className="stats-grid">
+        <StatCard
+          title="Total Revenue"
+          value={`Rs.${stats.revenue.toLocaleString()}`}
+          subtitle="vs last month"
+          icon={DollarSign}
+          color="#10B981"
+          trend={12.5}
+        />
+        <StatCard
+          title="Total Bookings"
+          value={stats.bookings.toLocaleString()}
+          subtitle="vs last month"
+          icon={Ticket}
+          color="#6366F1"
+          trend={8.2}
+        />
+        <StatCard
+          title="Active Passengers"
+          value={stats.passengers.toLocaleString()}
+          subtitle="vs last month"
+          icon={Users}
+          color="#F59E0B"
+          trend={-2.4}
+        />
+        <StatCard
+          title="Active Fleet"
+          value={stats.buses.toLocaleString()}
+          subtitle="Available for trips"
+          icon={Bus}
+          color="#3B82F6"
+          trend={5.1}
+        />
+      </div>
 
-        {/* ── Card 1: Booking Volume ── */}
-        <motion.div className="ov-card card-booking" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <div className="card-top">
-            <div className="card-label"><Activity size={16} /> Booking volume</div>
-            <button className="card-icon-btn"><BarChart3 size={14} /></button>
+      {/* ─── Main Charts Area ─── */}
+      <div className="charts-grid-main">
+        {/* Revenue Area Chart */}
+        <motion.div className="chart-card wide" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 }}>
+          <div className="chart-header">
+            <div>
+              <h3>Revenue Growth</h3>
+              <p>Monthly earnings performance</p>
+            </div>
+            <button className="chart-action"><BarChart3 size={16} /></button>
           </div>
-
-          <div className="sparkline-container">
-            <ResponsiveContainer width="100%" height={50}>
-              <AreaChart data={sparkData}>
+          <div className="chart-body" style={{ height: 320 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartRevenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.2} />
-                    <stop offset="100%" stopColor="var(--primary)" stopOpacity={0} />
+                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366F1" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="#6366F1" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <Area
-                  type="monotone" dataKey="v"
-                  stroke="var(--primary)" strokeWidth={2}
-                  fill="url(#sparkGrad)" dot={false}
-                />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} tickFormatter={(val) => `Rs.${val/1000}k`} />
+                <Tooltip content={<CustomTooltip />} />
+                <Area type="monotone" dataKey="val" stroke="#6366F1" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
+        </motion.div>
 
-          <div className="big-stats-row">
-            <div className="big-stat">
-              <span className="big-num">{loading ? '...' : (stats.bookings || 1544).toLocaleString()}</span>
-              <span className="big-label">Booked this month</span>
+        {/* Fleet Status Pie Chart */}
+        <motion.div className="chart-card" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }}>
+          <div className="chart-header">
+            <div>
+              <h3>Fleet Status</h3>
+              <p>Current state of all buses</p>
             </div>
-            <div className="big-stat">
-              <span className="big-num">96%</span>
-              <span className="big-label">Successful trips</span>
-            </div>
+            <button className="chart-action"><Activity size={16} /></button>
           </div>
-
-          <div className="mini-stats-grid">
-            <div className="mini-stat">
-              <span className="mini-label">Trips in transit</span>
-              <div className="mini-val-row">
-                <span className="mini-val">{loading ? '...' : (stats.buses || 482)}</span>
-                <TrendingUp size={14} className="mini-chart-icon" />
-              </div>
-            </div>
-            <div className="mini-stat">
-              <div className="mini-label">Delayed trips</div>
-              <div className="mini-val-row">
-                <span className="mini-val">14</span>
-                <span className="mini-badge warn">4% of all</span>
-              </div>
-            </div>
-            <div className="mini-stat">
-              <span className="mini-label">Fuel cost this month</span>
-              <span className="mini-val">Rs.18,420</span>
-            </div>
-            <div className="mini-stat">
-              <span className="mini-label">Avg. trip time</span>
-              <span className="mini-val">2d 24h 16m</span>
+          <div className="chart-body flex-center" style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={chartBusStatusData}
+                  cx="50%" cy="50%"
+                  innerRadius={70}
+                  outerRadius={90}
+                  paddingAngle={5}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {chartBusStatusData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip content={<CustomTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+            {/* Custom Legend */}
+            <div className="custom-legend">
+              {chartBusStatusData.map((item, i) => (
+                <div key={i} className="legend-item">
+                  <span className="legend-dot" style={{ backgroundColor: item.color }}></span>
+                  <span className="legend-label">{item.name}</span>
+                  <span className="legend-val">{item.value}</span>
+                </div>
+              ))}
             </div>
           </div>
         </motion.div>
-
-        {/* ── Card 2: Fleet / Vehicles ── */}
-        <motion.div className="ov-card card-fleet" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <div className="card-top">
-            <div className="card-label"><Bus size={16} /> Fleet</div>
-            <span className="card-count">{loading ? '...' : stats.buses || 66} Total</span>
-          </div>
-
-          <div className="fleet-stats-row">
-            <div className="fleet-stat-circle">
-              <span className="fleet-stat-num">128</span>
-              <span className="fleet-stat-label">Trips</span>
-            </div>
-            <div className="fleet-stat-circle">
-              <span className="fleet-stat-num">92%</span>
-              <span className="fleet-stat-label">On-time</span>
-            </div>
-            <div className="fleet-stat-circle">
-              <span className="fleet-stat-num">1,840</span>
-              <span className="fleet-stat-label">Distance (km)</span>
-            </div>
-          </div>
-
-          <div className="fleet-vehicle-preview">
-            <img src="/truck.png" alt="Bus" className="vehicle-img" />
-            <div className="vehicle-label">
-              <span>{selectedTrip ? selectedTrip.regNumber : 'No Bus Selected'} • <span className="active-dot">{selectedTrip ? 'Active' : 'N/A'}</span></span>
-            </div>
-          </div>
-
-          <div className="fleet-driver-row">
-            <div className="driver-avatar-sm">{selectedTrip ? selectedTrip.driverName.charAt(0) : '?'}</div>
-            <div className="driver-meta">
-              <strong>{selectedTrip ? selectedTrip.driverName : 'Unassigned'}</strong>
-              <span>Driver</span>
-            </div>
-            <div className="driver-actions-sm">
-              <button className="act-circle"><MapPin size={14} /></button>
-              <button className="act-circle"><Phone size={14} /></button>
-              <button className="act-circle"><MessageSquare size={14} /></button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* ── Card 3: Right Column (stacked) ── */}
-        <div className="card-right-col">
-          {/* Latest Booking */}
-          <motion.div className="ov-card card-latest" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-            <div className="card-top">
-              <div className="card-label"><Ticket size={16} /> Latest Booking</div>
-              <span className="see-all-link">See all</span>
-            </div>
-            <div className="latest-booking-row">
-              <div className="latest-info">
-                <h4>#RT-{(stats.bookings || 846134).toString().padStart(6, '0')}</h4>
-                <span className="latest-status-pill">In Transit</span>
-                <p className="latest-address">Colombo Fort → Maharagama</p>
-              </div>
-              <div className="latest-mini-map">
-                <MapPin size={24} className="mini-map-pin" />
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Revenue Overview */}
-          <motion.div className="ov-card card-revenue" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-            <div className="card-top">
-              <div className="card-label"><DollarSign size={16} /> Revenue Overview</div>
-              <span className="card-date-range">16 Jun - 1 Sep</span>
-            </div>
-            <div className="revenue-big-row">
-              <h2 className="revenue-amount">
-                Rs.{loading ? '...' : (stats.revenue || 223465).toLocaleString()}.40
-              </h2>
-              <span className="revenue-badge up"><ArrowUpRight size={12} /> +32.2%</span>
-            </div>
-            <div className="revenue-chart">
-              <ResponsiveContainer width="100%" height={80}>
-                <BarChart data={revenueData} barSize={6}>
-                  <Bar dataKey="val" radius={[3, 3, 0, 0]}>
-                    {revenueData.map((_, i) => (
-                      <Cell key={i} fill={i === revenueData.length - 1 ? 'var(--primary)' : 'var(--border)'} />
-                    ))}
-                  </Bar>
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </motion.div>
-        </div>
       </div>
 
-      <style jsx>{`
-        .overview {
+      {/* ─── Bottom Grid ─── */}
+      <div className="charts-grid-bottom">
+        {/* Passenger Traffic Line Chart */}
+        <motion.div className="chart-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+          <div className="chart-header">
+            <div>
+              <h3>Passenger Traffic</h3>
+              <p>Peak hours today</p>
+            </div>
+          </div>
+          <div className="chart-body" style={{ height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartTrafficData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Line type="smooth" dataKey="passengers" stroke="#10B981" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </motion.div>
+
+        {/* Recent Transactions List */}
+        <motion.div className="chart-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
+          <div className="chart-header">
+            <div>
+              <h3>Recent Transactions</h3>
+              <p>Latest ticket purchases</p>
+            </div>
+          </div>
+          <div className="transaction-list">
+            {recentTransactions.map((tx, i) => (
+              <div key={i} className="transaction-item">
+                <div className="tx-icon">
+                  <CreditCard size={16} />
+                </div>
+                <div className="tx-details">
+                  <h4>Booking {tx.booking_reference}</h4>
+                  <p>{tx.trip_schedules?.routes?.origin} → {tx.trip_schedules?.routes?.destination}</p>
+                </div>
+                <div className="tx-amount">
+                  +Rs. {Number(tx.total_fare || 0).toLocaleString()}
+                </div>
+              </div>
+            ))}
+            {recentTransactions.length === 0 && <p className="text-muted" style={{ fontSize: 13 }}>No recent transactions.</p>}
+          </div>
+        </motion.div>
+        
+        {/* Active Fleet List */}
+        <motion.div className="chart-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
+          <div className="chart-header">
+            <div>
+              <h3>Active Fleet</h3>
+              <p>Buses currently running</p>
+            </div>
+          </div>
+          <div className="transaction-list">
+            {activeBusesList.map((bus, i) => (
+              <div key={i} className="transaction-item">
+                <div className="tx-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10B981' }}>
+                  <Bus size={16} />
+                </div>
+                <div className="tx-details">
+                  <h4>{bus.vehicle_reg_number}</h4>
+                  <p>{bus.routes ? `${bus.routes.origin} → ${bus.routes.destination}` : 'Unassigned Route'}</p>
+                </div>
+                <div className="tx-amount" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-main)', background: 'var(--bg-main)', padding: '4px 8px', borderRadius: 12 }}>
+                  {bus.bus_type}
+                </div>
+              </div>
+            ))}
+            {activeBusesList.length === 0 && <p className="text-muted" style={{ fontSize: 13 }}>No active buses right now.</p>}
+          </div>
+        </motion.div>
+      </div>
+
+      <style>{`
+        .analytics-dashboard {
           display: flex;
           flex-direction: column;
           gap: 24px;
         }
 
-        /* ═══ MAP SECTION ═══ */
-        .map-section {
-          position: relative;
-          height: 420px;
-          border-radius: var(--radius-xl);
-          overflow: hidden;
-          border: 1px solid var(--border);
-          box-shadow: var(--shadow-md);
-        }
-
-        .map-overlay-controls {
-          position: absolute;
-          top: 20px;
-          left: 20px;
-          z-index: 999;
-          display: flex;
-          gap: 12px;
-        }
-
-        .map-search-bar {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: 40px;
-          padding: 10px 20px;
-          min-width: 220px;
-          box-shadow: var(--shadow-md);
-          color: var(--text-muted);
-        }
-        .map-search-bar input {
-          border: none;
-          background: transparent;
-          outline: none;
-          font-size: 14px;
-          font-weight: 500;
-          color: var(--text-main);
-          width: 100%;
-        }
-
-        .map-filter-pill {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: 40px;
-          padding: 10px 18px;
-          font-size: 13px;
-          color: var(--text-muted);
-          box-shadow: var(--shadow-md);
-          cursor: pointer;
-        }
-        .map-filter-pill strong {
-          color: var(--text-main);
-          font-weight: 700;
-        }
-
-        .map-corner-controls {
-          position: absolute;
-          top: 20px;
-          right: 20px;
-          z-index: 999;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-        .map-ctrl-btn {
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          color: var(--text-muted);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          box-shadow: var(--shadow-sm);
-          transition: all 0.15s ease;
-        }
-        .map-ctrl-btn:hover {
-          color: var(--primary);
-          border-color: var(--primary);
-        }
-
-        /* Leaflet overrides */
-        .map-section :global(.leaflet-container) {
-          background: var(--bg-main);
-        }
-        .map-section :global(.leaflet-control-attribution) {
-          display: none;
-        }
-
-        /* ═══ CARDS GRID ═══ */
-        .cards-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr 1fr;
-          gap: 20px;
-        }
-
-        .ov-card {
-          padding: 24px;
-        }
-
-        .card-top {
+        /* Header */
+        .dashboard-header {
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          margin-bottom: 16px;
+          align-items: flex-end;
         }
-        .card-label {
-          display: flex;
-          align-items: center;
-          gap: 8px;
+        .page-title {
+          font-size: 24px;
+          font-weight: 800;
+          color: var(--text-main);
+          margin-bottom: 4px;
+        }
+        .page-subtitle {
           font-size: 14px;
-          font-weight: 600;
-          color: var(--text-main);
-        }
-        .card-icon-btn {
-          width: 30px;
-          height: 30px;
-          border-radius: 8px;
-          border: 1px solid var(--border);
-          background: transparent;
-          color: var(--text-muted);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-        }
-        .card-count {
-          font-size: 12px;
-          font-weight: 600;
           color: var(--text-muted);
         }
-        .see-all-link {
-          font-size: 12px;
-          font-weight: 600;
-          color: var(--primary);
-          cursor: pointer;
-        }
-        .card-date-range {
-          font-size: 11px;
-          color: var(--text-muted);
-          font-weight: 500;
-        }
-
-        /* ── Card 1: Booking Volume ── */
-        .sparkline-container {
-          margin-bottom: 16px;
-        }
-        .big-stats-row {
-          display: flex;
-          gap: 32px;
-          margin-bottom: 20px;
-        }
-        .big-stat {
-          display: flex;
-          flex-direction: column;
-        }
-        .big-num {
-          font-size: 32px;
-          font-weight: 800;
-          color: var(--text-main);
-          line-height: 1.1;
-        }
-        .big-label {
-          font-size: 11px;
-          color: var(--text-muted);
-          font-weight: 500;
-          margin-top: 4px;
-        }
-        .mini-stats-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-        }
-        .mini-stat {
-          background: var(--bg-main);
-          border-radius: var(--radius-sm);
-          padding: 14px;
-          border: 1px solid var(--border-light);
-        }
-        .mini-label {
-          font-size: 11px;
-          color: var(--text-muted);
-          font-weight: 500;
-          margin-bottom: 6px;
-          display: block;
-        }
-        .mini-val-row {
+        .date-picker-btn {
           display: flex;
           align-items: center;
           gap: 8px;
-        }
-        .mini-val {
-          font-size: 20px;
-          font-weight: 800;
-          color: var(--text-main);
-        }
-        .mini-chart-icon {
-          color: var(--primary);
-        }
-        .mini-badge {
-          font-size: 10px;
-          font-weight: 700;
-          padding: 2px 8px;
-          border-radius: 12px;
-        }
-        .mini-badge.warn {
-          background: rgba(255, 122, 34, 0.12);
-          color: var(--accent-orange);
-        }
-
-        /* ── Card 2: Fleet ── */
-        .fleet-stats-row {
-          display: flex;
-          justify-content: space-around;
-          margin-bottom: 20px;
-          gap: 12px;
-        }
-        .fleet-stat-circle {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          width: 100px;
-          height: 100px;
-          border-radius: 50%;
-          border: 2px solid var(--border);
-          transition: var(--transition);
-        }
-        .fleet-stat-circle:hover {
-          border-color: var(--primary);
-        }
-        .fleet-stat-num {
-          font-size: 20px;
-          font-weight: 800;
-          color: var(--text-main);
-        }
-        .fleet-stat-label {
-          font-size: 10px;
-          color: var(--text-muted);
-          font-weight: 500;
-          margin-top: 2px;
-        }
-
-        .fleet-vehicle-preview {
-          text-align: center;
-          margin-bottom: 16px;
-          position: relative;
-        }
-        .vehicle-img {
-          width: 85%;
-          max-width: 280px;
-          height: auto;
-          object-fit: contain;
-          border-radius: var(--radius-md);
-        }
-        .vehicle-label {
-          font-size: 12px;
-          color: var(--text-muted);
-          margin-top: 8px;
-        }
-        .active-dot {
-          color: var(--accent-green);
-          font-weight: 700;
-        }
-
-        .fleet-driver-row {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding-top: 16px;
-          border-top: 1px solid var(--border);
-        }
-        .driver-avatar-sm {
-          width: 38px;
-          height: 38px;
-          border-radius: 50%;
-          background: var(--primary-light);
-          color: var(--primary);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 700;
-          font-size: 15px;
-        }
-        .driver-meta {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-        }
-        .driver-meta strong {
-          font-size: 13px;
-          color: var(--text-main);
-        }
-        .driver-meta span {
-          font-size: 11px;
-          color: var(--text-muted);
-        }
-        .driver-actions-sm {
-          display: flex;
-          gap: 6px;
-        }
-        .act-circle {
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
+          background: var(--bg-card);
           border: 1px solid var(--border);
-          background: transparent;
-          color: var(--text-muted);
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          padding: 8px 16px;
+          border-radius: 8px;
+          color: var(--text-main);
+          font-size: 13px;
+          font-weight: 600;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: border-color 0.2s;
         }
-        .act-circle:hover {
-          background: var(--primary);
-          color: white;
-          border-color: var(--primary);
-        }
+        .date-picker-btn:hover { border-color: var(--primary); }
 
-        /* ── Card 3: Right Column ── */
-        .card-right-col {
-          display: flex;
-          flex-direction: column;
+        /* Top Stats Grid */
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
           gap: 20px;
         }
-
-        /* Latest Booking */
-        .latest-booking-row {
+        .stat-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          padding: 20px;
           display: flex;
           align-items: flex-start;
           gap: 16px;
+          box-shadow: var(--shadow-sm);
         }
-        .latest-info {
-          flex: 1;
-        }
-        .latest-info h4 {
-          font-size: 16px;
-          font-weight: 700;
-          margin-bottom: 6px;
-        }
-        .latest-status-pill {
-          display: inline-block;
-          padding: 3px 10px;
+        .stat-card-icon {
+          width: 48px;
+          height: 48px;
           border-radius: 12px;
-          font-size: 11px;
-          font-weight: 700;
-          background: rgba(0, 102, 255, 0.1);
-          color: var(--primary);
-          margin-bottom: 8px;
-        }
-        .latest-address {
-          font-size: 12px;
-          color: var(--text-muted);
-        }
-        .latest-mini-map {
-          width: 72px;
-          height: 72px;
-          border-radius: var(--radius-md);
-          background: var(--secondary);
           display: flex;
           align-items: center;
           justify-content: center;
           flex-shrink: 0;
         }
-        .mini-map-pin {
-          color: var(--primary);
+        .stat-card-content { flex: 1; }
+        .stat-card-content h3 {
+          font-size: 13px;
+          color: var(--text-muted);
+          font-weight: 600;
+          margin-bottom: 6px;
         }
-
-        /* Revenue */
-        .revenue-big-row {
-          display: flex;
-          align-items: baseline;
-          gap: 12px;
-          margin-bottom: 12px;
-        }
-        .revenue-amount {
-          font-size: 24px;
+        .stat-card-content h2 {
+          font-size: 26px;
           font-weight: 800;
           color: var(--text-main);
+          margin-bottom: 8px;
         }
-        .revenue-badge {
-          display: inline-flex;
+        .stat-card-footer {
+          display: flex;
           align-items: center;
-          gap: 3px;
-          padding: 3px 8px;
-          border-radius: 10px;
-          font-size: 11px;
+          gap: 8px;
+        }
+        .trend {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          font-size: 12px;
           font-weight: 700;
         }
-        .revenue-badge.up {
-          background: rgba(16, 185, 129, 0.12);
-          color: var(--accent-green);
-        }
-        .revenue-chart {
-          margin-top: 4px;
+        .trend.up { color: #10B981; }
+        .trend.down { color: #EF4444; }
+        .rotate-180 { transform: rotate(90deg); }
+        .subtitle {
+          font-size: 11px;
+          color: var(--text-muted);
         }
 
-        /* ═══ RESPONSIVE ═══ */
+        /* Charts Main Grid */
+        .charts-grid-main {
+          display: grid;
+          grid-template-columns: 2fr 1fr;
+          gap: 20px;
+        }
+        .charts-grid-bottom {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 20px;
+        }
+
+        /* Chart Cards */
+        .chart-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          padding: 24px;
+          box-shadow: var(--shadow-sm);
+          display: flex;
+          flex-direction: column;
+        }
+        .chart-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 24px;
+        }
+        .chart-header h3 {
+          font-size: 16px;
+          font-weight: 700;
+          color: var(--text-main);
+          margin-bottom: 4px;
+        }
+        .chart-header p {
+          font-size: 13px;
+          color: var(--text-muted);
+        }
+        .chart-action {
+          background: var(--bg-main);
+          border: 1px solid var(--border);
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--text-muted);
+          cursor: pointer;
+        }
+
+        /* Custom Tooltip */
+        .chart-tooltip {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          padding: 10px 14px;
+          border-radius: 8px;
+          box-shadow: var(--shadow-lg);
+        }
+        .chart-tooltip .label {
+          font-size: 12px;
+          color: var(--text-muted);
+          margin-bottom: 4px;
+        }
+        .chart-tooltip .value {
+          font-size: 16px;
+          font-weight: 700;
+          color: var(--text-main);
+        }
+
+        /* Legend */
+        .custom-legend {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          display: flex;
+          justify-content: center;
+          gap: 16px;
+        }
+        .legend-item {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .legend-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+        }
+        .legend-label { font-size: 12px; color: var(--text-muted); }
+        .legend-val { font-size: 12px; font-weight: 700; color: var(--text-main); }
+        
+        .flex-center { position: relative; display: flex; flex-direction: column; }
+
+        /* Lists */
+        .transaction-list, .insights-list {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          flex: 1;
+        }
+        .transaction-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding-bottom: 12px;
+          border-bottom: 1px solid var(--border-light);
+        }
+        .transaction-item:last-child { border-bottom: none; padding-bottom: 0; }
+        .tx-icon {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background: rgba(99, 102, 241, 0.1);
+          color: #6366F1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .tx-details { flex: 1; }
+        .tx-details h4 { font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 2px; }
+        .tx-details p { font-size: 11px; color: var(--text-muted); }
+        .tx-amount { font-size: 14px; font-weight: 700; color: #10B981; }
+
+        .insight-item {
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          background: var(--bg-main);
+          padding: 14px;
+          border-radius: var(--radius-md);
+        }
+        .insight-icon {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .insight-item p {
+          font-size: 13px;
+          line-height: 1.5;
+          color: var(--text-muted);
+        }
+        .insight-item p strong { color: var(--text-main); }
+
+        /* Responsive */
         @media (max-width: 1200px) {
-          .cards-grid {
-            grid-template-columns: 1fr 1fr;
-          }
-          .card-right-col {
-            grid-column: 1 / -1;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-          }
+          .stats-grid { grid-template-columns: repeat(2, 1fr); }
+          .charts-grid-main { grid-template-columns: 1fr; }
+          .charts-grid-bottom { grid-template-columns: repeat(2, 1fr); }
         }
         @media (max-width: 768px) {
-          .map-section { height: 280px; }
-          .cards-grid {
-            grid-template-columns: 1fr;
-          }
-          .card-right-col {
-            grid-template-columns: 1fr;
-          }
-          .big-num { font-size: 24px; }
-          .fleet-stats-row { flex-wrap: wrap; }
+          .stats-grid { grid-template-columns: 1fr; }
+          .charts-grid-bottom { grid-template-columns: 1fr; }
+          .dashboard-header { flex-direction: column; align-items: flex-start; gap: 16px; }
         }
       `}</style>
     </div>

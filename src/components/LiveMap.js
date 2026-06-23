@@ -33,7 +33,8 @@ const LiveMap = () => {
         [6.8850, 79.8900],
         [6.8500, 79.9200]  // Maharagama
       ],
-      currentLocation: [6.8850, 79.8900]
+      currentLocation: [6.8850, 79.8900],
+      fleet: { busNumber: 'ND-4521', seats: 54, speed: '45 km/h', progress: 65 }
     },
     {
       id: 'RT-2017003323',
@@ -50,7 +51,8 @@ const LiveMap = () => {
         [7.2800, 80.6100],
         [7.2680, 80.5950]  // Peradeniya
       ],
-      currentLocation: [7.2800, 80.6100]
+      currentLocation: [7.2800, 80.6100],
+      fleet: { busNumber: 'CP-2983', seats: 42, speed: '38 km/h', progress: 40 }
     }
   ];
 
@@ -128,6 +130,22 @@ const LiveMap = () => {
                   <button className="action-btn"><MessageSquare size={16} /></button>
                 </div>
               </div>
+
+              {activeTrip === trip.id && (
+                <div className="fleet-info" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Bus: <strong style={{color: 'var(--text-main)'}}>{trip.fleet.busNumber}</strong></span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Seats: <strong style={{color: 'var(--text-main)'}}>{trip.fleet.seats}</strong></span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: '600' }}>Speed: {trip.fleet.speed}</span>
+                    <span style={{ fontSize: '13px', color: 'var(--primary)', fontWeight: 'bold' }}>Progress: {trip.fleet.progress}%</span>
+                  </div>
+                  <div style={{ width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ width: `${trip.fleet.progress}%`, height: '100%', background: 'var(--primary)', borderRadius: '3px', transition: 'width 0.5s ease-in-out' }}></div>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -146,12 +164,31 @@ const LiveMap = () => {
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" // Premium light theme map
           />
 
+          {trips.map(trip => (
+            <Marker 
+              key={trip.id} 
+              position={trip.currentLocation}
+              eventHandlers={{
+                click: () => setActiveTrip(trip.id),
+              }}
+            >
+              <Popup>
+                <div style={{ textAlign: 'center', minWidth: '120px' }}>
+                  <strong style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>{trip.id}</strong>
+                  <div style={{ fontSize: '12px', color: '#666' }}>{trip.busType}</div>
+                  <div style={{ fontSize: '12px', marginTop: '4px', fontWeight: 'bold', color: '#2563EB' }}>Click for fleet details</div>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+
           {activeTripData && (
-            <>
-
-
-
-            </>
+            <Polyline 
+              positions={activeTripData.coordinates} 
+              color="var(--primary)" 
+              weight={5} 
+              opacity={0.8} 
+            />
           )}
         </MapContainer>
 
