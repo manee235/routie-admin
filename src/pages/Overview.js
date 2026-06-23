@@ -10,8 +10,7 @@ import {
   DollarSign,
   Users,
   Calendar,
-  CreditCard,
-  Volume2
+  CreditCard
 } from 'lucide-react';
 import {
   XAxis,
@@ -27,10 +26,9 @@ import {
   LineChart,
   Line
 } from 'recharts';
-import { generateNarration, playAudio } from '../services/aiService';
+
 
 const Overview = () => {
-  const [narrating, setNarrating] = useState(false);
   const [stats, setStats] = useState({
     passengers: 0, buses: 0, bookings: 0, revenue: 0
   });
@@ -150,18 +148,6 @@ const Overview = () => {
     return null;
   };
 
-  const handleNarrate = async () => {
-    setNarrating(true);
-    try {
-      const prompt = `You are a helpful AI assistant for the Routie Fleet Management System. Summarize the following Dashboard Analytics in a very concise, conversational, and energetic tone (under 2 sentences). Total Revenue: Rs ${stats.revenue.toLocaleString()}, Total Bookings: ${stats.bookings.toLocaleString()}, Active Fleet: ${stats.buses}.`;
-      const text = await generateNarration(prompt);
-      playAudio(text);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setNarrating(false);
-    }
-  };
 
   return (
     <div className="analytics-dashboard">
@@ -171,10 +157,6 @@ const Overview = () => {
           <p className="page-subtitle">Monitor your system performance and metrics</p>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px', height: 42, background: 'var(--primary)' }} onClick={handleNarrate} disabled={narrating || loading}>
-            <Volume2 size={16} />
-            {narrating ? 'Generating...' : 'AI Insights'}
-          </button>
           <div className="date-picker-btn">
             <Calendar size={16} />
             <span>Last 30 Days</span>
