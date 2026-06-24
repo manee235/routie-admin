@@ -67,14 +67,7 @@ const Login = () => {
         <div className="login-form-container">
           {/* Logo block */}
           <div className="logo-area">
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" className="logo-icon">
-              <circle cx="20" cy="20" r="20" fill="#0066FF"/>
-              <path d="M12 28V20C12 18.8954 12.8954 18 14 18H16C17.1046 18 18 18.8954 18 20V28H12Z" fill="white"/>
-              <path d="M19 28V15C19 13.8954 19.8954 13 21 13H23C24.1046 13 25 13.8954 25 15V28H19Z" fill="white" fillOpacity="0.8"/>
-              <path d="M26 28V10C26 8.89543 26.8954 8 28 8H30C31.1046 8 32 8.89543 32 10V28H26Z" fill="white" fillOpacity="0.6"/>
-              <path d="M10 24L17.5 16.5L23.5 20.5L31.5 11" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="logo-title">Filuick <span className="logo-tag">Pay</span></span>
+            <span className="logo-title">Routie <span className="logo-tag">Admin</span></span>
           </div>
 
           <div className="login-headers">
